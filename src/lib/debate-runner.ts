@@ -2,19 +2,19 @@ import { supabaseAdmin } from "./supabase";
 import { AGENTS, Agent } from "./agents";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-// Fallback chain: tries each model in order on 429/503/error
+// Fallback chain: tries each model in order on 429/503/404/error
 const MODELS = [
-  "meta-llama/llama-3.1-8b-instruct:free",
-  "mistralai/mistral-7b-instruct:free",
-  "google/gemma-3-12b-it:free",
   "google/gemma-3-27b-it:free",
-  "nousresearch/hermes-3-llama-3.1-405b:free",
+  "google/gemma-3-12b-it:free",
+  "mistralai/mistral-7b-instruct:free",
+  "mistralai/mistral-small-3.1-24b-instruct:free",
   "qwen/qwen-2.5-7b-instruct:free",
-  "qwen/qwen3-8b:free",
-  "nvidia/llama-3.1-nemotron-70b-instruct:free",
-  "microsoft/phi-3-mini-128k-instruct:free",
+  "qwen/qwen2.5-vl-7b-instruct:free",
   "meta-llama/llama-3.2-3b-instruct:free",
-  "liquid/lfm-7b:free",
+  "meta-llama/llama-3.2-1b-instruct:free",
+  "microsoft/phi-3-mini-128k-instruct:free",
+  "huggingfaceh4/zephyr-7b-beta:free",
+  "openchat/openchat-3.5-0106:free",
   "minimax/minimax-m2.5:free",
 ];
 const IS_TEST = process.env.TEST_MODE === "true";
@@ -43,7 +43,7 @@ async function fetchWithFallback(body: object, stream: boolean): Promise<Respons
     const res = await callOpenRouter(MODELS[i], body, stream);
     if (res.ok) return res;
     lastStatus = res.status;
-    const retryable = res.status === 429 || res.status === 503 || res.status === 502;
+    const retryable = res.status === 429 || res.status === 503 || res.status === 502 || res.status === 404;
     console.warn(`[debate-runner] ${MODELS[i]} → ${res.status}${retryable ? ", trying next..." : ""}`);
     if (!retryable) throw new Error(`OpenRouter error: ${res.status}`);
     if (i < MODELS.length - 1) await sleep(1500);
