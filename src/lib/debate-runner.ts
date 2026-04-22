@@ -2,11 +2,20 @@ import { supabaseAdmin } from "./supabase";
 import { AGENTS, Agent } from "./agents";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-// Fallback chain: try each model in order if rate-limited
+// Fallback chain: tries each model in order on 429/503/error
 const MODELS = [
   "meta-llama/llama-3.1-8b-instruct:free",
   "mistralai/mistral-7b-instruct:free",
   "google/gemma-3-12b-it:free",
+  "google/gemma-3-27b-it:free",
+  "nousresearch/hermes-3-llama-3.1-405b:free",
+  "qwen/qwen-2.5-7b-instruct:free",
+  "qwen/qwen3-8b:free",
+  "nvidia/llama-3.1-nemotron-70b-instruct:free",
+  "microsoft/phi-3-mini-128k-instruct:free",
+  "meta-llama/llama-3.2-3b-instruct:free",
+  "liquid/lfm-7b:free",
+  "minimax/minimax-m2.5:free",
 ];
 const IS_TEST = process.env.TEST_MODE === "true";
 
@@ -27,19 +36,19 @@ async function callOpenRouter(model: string, body: object, stream: boolean): Pro
   return res;
 }
 
-// Tries each model in MODELS until one succeeds (handles 429 rate limits)
+// Tries each model in MODELS until one succeeds (handles 429/503/unavailable)
 async function fetchWithFallback(body: object, stream: boolean): Promise<Response> {
+  let lastStatus = 0;
   for (let i = 0; i < MODELS.length; i++) {
     const res = await callOpenRouter(MODELS[i], body, stream);
     if (res.ok) return res;
-    if (res.status === 429 && i < MODELS.length - 1) {
-      console.warn(`[debate-runner] ${MODELS[i]} rate limited, trying next model...`);
-      await sleep(2000);
-      continue;
-    }
-    throw new Error(`OpenRouter error: ${res.status}`);
+    lastStatus = res.status;
+    const retryable = res.status === 429 || res.status === 503 || res.status === 502;
+    console.warn(`[debate-runner] ${MODELS[i]} → ${res.status}${retryable ? ", trying next..." : ""}`);
+    if (!retryable) throw new Error(`OpenRouter error: ${res.status}`);
+    if (i < MODELS.length - 1) await sleep(1500);
   }
-  throw new Error("All models rate limited");
+  throw new Error(`All models failed (last: ${lastStatus})`);
 }
 
 async function streamAgentResponse(
