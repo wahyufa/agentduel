@@ -34,6 +34,57 @@ function getUserIdentifier(publicKey: { toBase58(): string } | null): string | n
   return localStorage.getItem("agentduel_guest_id");
 }
 
+// Elapsed timer: counts up from a start time
+function ElapsedTimer({ from }: { from: string }) {
+  const [elapsed, setElapsed] = useState(Date.now() - new Date(from).getTime());
+  useEffect(() => {
+    const iv = setInterval(() => setElapsed(Date.now() - new Date(from).getTime()), 1000);
+    return () => clearInterval(iv);
+  }, [from]);
+  const m = Math.floor(elapsed / 60000);
+  const s = Math.floor((elapsed % 60000) / 1000);
+  return <>{String(m).padStart(2, "0")}:{String(s).padStart(2, "0")}</>;
+}
+
+// Countdown badge: counts down to a future time
+function CountdownTo({ to }: { to: string }) {
+  const calc = () => Math.max(0, new Date(to).getTime() - Date.now());
+  const [diff, setDiff] = useState(calc());
+  useEffect(() => {
+    const iv = setInterval(() => setDiff(calc()), 1000);
+    return () => clearInterval(iv);
+  }, [to]);
+  if (diff === 0) return <>Starting soon</>;
+  const totalS = Math.floor(diff / 1000);
+  const d = Math.floor(totalS / 86400);
+  const h = Math.floor((totalS % 86400) / 3600);
+  const m = Math.floor((totalS % 3600) / 60);
+  const s = totalS % 60;
+  if (d > 0) return <>{d}d {String(h).padStart(2, "0")}h {String(m).padStart(2, "0")}m</>;
+  return <>{String(h).padStart(2, "0")}:{String(m).padStart(2, "0")}:{String(s).padStart(2, "0")}</>;
+}
+
+function playWinnerSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const notes = [392, 494, 587, 784]; // G4 B4 D5 G5 - major arpeggio
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.15;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.25, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+      osc.start(t);
+      osc.stop(t + 0.5);
+    });
+  } catch {}
+}
+
 function DebatePageInner() {
   const { publicKey } = useWallet();
   const feedRef = useRef<HTMLDivElement>(null);
@@ -51,6 +102,15 @@ function DebatePageInner() {
   const [userPrediction, setUserPrediction] = useState<string | null>(null);
   const [predCounts, setPredCounts] = useState<Record<string, number>>({});
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const prevStatusRef = useRef<string | null>(null);
+
+  // Play sound when winner is announced
+  useEffect(() => {
+    if (debate?.status === "resolved" && prevStatusRef.current && prevStatusRef.current !== "resolved") {
+      playWinnerSound();
+    }
+    prevStatusRef.current = debate?.status ?? null;
+  }, [debate?.status]);
 
   // Upcoming / Past tab state
   const [upcomingDebates, setUpcomingDebates] = useState<Debate[]>([]);
@@ -484,6 +544,23 @@ function DebatePageInner() {
 
                 {/* Side panel */}
                 <div className="space-y-4">
+                  {/* Timer card — always visible during active debates */}
+                  {debate.status === "live" && debate.started_at && (
+                    <div className="bg-white border border-[#e0d9ce] rounded-2xl p-4 text-center space-y-1">
+                      <p className="text-[10px] font-bold tracking-[2px] uppercase text-[#d93b1f]">
+                        Debate Running
+                      </p>
+                      <p className="font-['Bebas_Neue'] text-5xl tracking-wide text-[#1a1714]">
+                        <ElapsedTimer from={debate.started_at} />
+                      </p>
+                      <div className="mt-2 px-3 py-1.5 rounded-lg bg-[#f7f3ec]">
+                        <p className="text-[10px] text-[#8a8178]">
+                          ⏱ Submission countdown starts after debate ends
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {debate.status === "submission" && secondsLeft !== null && (
                     <div className="bg-white border-2 border-[#e8a100] rounded-2xl p-4 text-center space-y-1">
                       <p className="text-[10px] font-bold tracking-[2px] uppercase text-[#e8a100]">
@@ -565,6 +642,7 @@ function DebatePageInner() {
               upcomingDebates.map((d) => {
                 const a = AGENTS[d.agent_a_id];
                 const b = AGENTS[d.agent_b_id];
+                const hasTime = !!d.scheduled_for;
                 return (
                   <div
                     key={d.id}
@@ -575,8 +653,8 @@ function DebatePageInner() {
                         <p className="text-[10px] font-bold tracking-[2px] uppercase text-[#8a8178] mb-1">
                           Upcoming
                         </p>
-                        <p className="font-semibold text-sm mb-3 truncate">"{d.topic}"</p>
-                        <div className="flex items-center gap-3">
+                        <p className="font-semibold text-sm mb-3">"{d.topic}"</p>
+                        <div className="flex items-center gap-3 mb-3">
                           {a && (
                             <div className="flex items-center gap-1.5">
                               <span>{a.emoji}</span>
@@ -591,16 +669,45 @@ function DebatePageInner() {
                             </div>
                           )}
                         </div>
+
+                        {hasTime && (
+                          <p className="text-[10px] text-[#8a8178]">
+                            {new Date(d.scheduled_for!).toLocaleString(undefined, {
+                              weekday: "short",
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                        )}
                       </div>
-                      <span
-                        className="text-[10px] font-bold px-3 py-1.5 rounded-full flex-shrink-0"
-                        style={{
-                          background: `${STATUS_COLOR.scheduled}15`,
-                          color: STATUS_COLOR.scheduled,
-                        }}
-                      >
-                        Scheduled
-                      </span>
+
+                      <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                        {hasTime ? (
+                          <div
+                            className="text-center px-3 py-2 rounded-xl"
+                            style={{ background: "#f7f3ec", border: "1px solid #e0d9ce" }}
+                          >
+                            <p className="text-[9px] font-bold tracking-[1.5px] uppercase text-[#8a8178] mb-0.5">
+                              Starts in
+                            </p>
+                            <p className="font-['Bebas_Neue'] text-lg tracking-wide text-[#1a1714] leading-none">
+                              <CountdownTo to={d.scheduled_for!} />
+                            </p>
+                          </div>
+                        ) : (
+                          <span
+                            className="text-[10px] font-bold px-3 py-1.5 rounded-full"
+                            style={{
+                              background: `${STATUS_COLOR.scheduled}15`,
+                              color: STATUS_COLOR.scheduled,
+                            }}
+                          >
+                            Scheduled
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

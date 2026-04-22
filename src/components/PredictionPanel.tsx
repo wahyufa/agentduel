@@ -37,6 +37,7 @@ const PredictionPanel: FC<Props> = ({
   const { connected, publicKey } = useWallet();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
 
   const totalA = counts[agentA.id] ?? 0;
   const totalB = counts[agentB.id] ?? 0;
@@ -111,16 +112,22 @@ const PredictionPanel: FC<Props> = ({
           const pct = i === 0 ? pctA : pctB;
           const count = i === 0 ? totalA : totalB;
 
+          const hovered = hoveredAgent === agent.id && !loading && !isLocked && canChange;
           return (
             <button
               key={agent.id}
               onClick={() => predict(agent.id)}
               disabled={loading || isLocked || !canChange}
-              className="flex flex-col items-center gap-2 p-3 rounded-xl border transition-all disabled:cursor-default"
+              onMouseEnter={() => setHoveredAgent(agent.id)}
+              onMouseLeave={() => setHoveredAgent(null)}
+              className="flex flex-col items-center gap-2 p-3 rounded-xl border disabled:cursor-default"
               style={{
-                borderColor: selected ? color : "#e0d9ce",
-                background: selected ? `${color}08` : "#f7f3ec",
+                borderColor: selected ? color : hovered ? `${color}80` : "#e0d9ce",
+                background: selected ? `${color}10` : hovered ? `${color}06` : "#f7f3ec",
                 opacity: loading ? 0.6 : 1,
+                transform: hovered ? "translateY(-2px)" : "translateY(0)",
+                boxShadow: hovered ? `0 4px 12px ${color}20` : "none",
+                transition: "all 0.18s ease",
               }}
             >
               <span className="text-2xl">{agent.emoji}</span>
