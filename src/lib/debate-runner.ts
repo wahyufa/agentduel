@@ -1,21 +1,14 @@
 import { supabaseAdmin } from "./supabase";
 import { AGENTS, Agent } from "./agents";
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-// Fallback chain: tries each model in order on 429/503/404/error
+const GROQ_API_KEY = process.env.GROQ_API_KEY!;
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// Fallback chain: tries each model in order on rate limits
 const MODELS = [
-  "google/gemma-3-27b-it:free",
-  "google/gemma-3-12b-it:free",
-  "mistralai/mistral-7b-instruct:free",
-  "mistralai/mistral-small-3.1-24b-instruct:free",
-  "qwen/qwen-2.5-7b-instruct:free",
-  "qwen/qwen2.5-vl-7b-instruct:free",
-  "meta-llama/llama-3.2-3b-instruct:free",
-  "meta-llama/llama-3.2-1b-instruct:free",
-  "microsoft/phi-3-mini-128k-instruct:free",
-  "huggingfaceh4/zephyr-7b-beta:free",
-  "openchat/openchat-3.5-0106:free",
-  "minimax/minimax-m2.5:free",
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "mixtral-8x7b-32768",
+  "gemma2-9b-it",
 ];
 const IS_TEST = process.env.TEST_MODE === "true";
 
@@ -24,31 +17,30 @@ const SUBMISSION_MS = IS_TEST ? 30_000  : 5 * 60_000; // test: 30s | prod: 5min
 
 type HistoryEntry = { speaker: string; text: string };
 
-async function callOpenRouter(model: string, body: object, stream: boolean): Promise<Response> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+async function callGroq(model: string, body: object): Promise<Response> {
+  return fetch(GROQ_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${GROQ_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ model, ...body }),
   });
-  return res;
 }
 
-// Tries each model in MODELS until one succeeds (handles 429/503/unavailable)
-async function fetchWithFallback(body: object, stream: boolean): Promise<Response> {
+// Tries each Groq model in order on rate limits (429) or unavailability
+async function fetchWithFallback(body: object): Promise<Response> {
   let lastStatus = 0;
   for (let i = 0; i < MODELS.length; i++) {
-    const res = await callOpenRouter(MODELS[i], body, stream);
+    const res = await callGroq(MODELS[i], body);
     if (res.ok) return res;
     lastStatus = res.status;
-    const retryable = res.status === 429 || res.status === 503 || res.status === 502 || res.status === 404;
+    const retryable = res.status === 429 || res.status === 503 || res.status === 502;
     console.warn(`[debate-runner] ${MODELS[i]} → ${res.status}${retryable ? ", trying next..." : ""}`);
-    if (!retryable) throw new Error(`OpenRouter error: ${res.status}`);
-    if (i < MODELS.length - 1) await sleep(1500);
+    if (!retryable) throw new Error(`Groq error: ${res.status}`);
+    if (i < MODELS.length - 1) await sleep(2000);
   }
-  throw new Error(`All models failed (last: ${lastStatus})`);
+  throw new Error(`All Groq models failed (last: ${lastStatus})`);
 }
 
 async function streamAgentResponse(
@@ -57,7 +49,6 @@ async function streamAgentResponse(
   history: HistoryEntry[]
 ): Promise<string> {
   const res = await fetchWithFallback({
-    stream: true,
     temperature: 0.85,
     max_tokens: 150,
     messages: [
@@ -71,30 +62,12 @@ async function streamAgentResponse(
         content: `Topic: "${topic}". Make your next argument. Be sharp and stay in character.`,
       },
     ],
-  }, true);
+  });
 
-  if (!res.ok) throw new Error(`OpenRouter error: ${res.status}`);
+  if (!res.ok) throw new Error(`Groq error: ${res.status}`);
 
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let full = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = decoder.decode(value);
-    for (const line of chunk.split("\n")) {
-      const trimmed = line.replace(/^data: /, "").trim();
-      if (!trimmed || trimmed === "[DONE]") continue;
-      try {
-        const parsed = JSON.parse(trimmed);
-        const delta = parsed.choices?.[0]?.delta?.content;
-        if (delta) full += delta;
-      } catch {}
-    }
-  }
-
-  return full.trim();
+  const data = await res.json();
+  return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
 async function judgeConclusive(history: HistoryEntry[]): Promise<boolean> {
@@ -111,7 +84,7 @@ async function judgeConclusive(history: HistoryEntry[]): Promise<boolean> {
       },
       { role: "user", content: transcript },
     ],
-  }, false);
+  });
 
   const data = await res.json();
   const answer = data.choices?.[0]?.message?.content?.trim().toUpperCase() ?? "";
@@ -134,7 +107,7 @@ async function judgeWinner(
       },
       { role: "user", content: transcript },
     ],
-  }, false);
+  });
 
   const data = await res.json();
   const raw = data.choices?.[0]?.message?.content ?? "{}";
