@@ -3,12 +3,13 @@ import { AGENTS, Agent } from "./agents";
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-// Fallback chain: tries each model in order on rate limits
+// Ordered by rate-limit generosity — smaller models have higher daily limits on Groq free tier
 const MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "mixtral-8x7b-32768",
-  "gemma2-9b-it",
+  "llama-3.1-8b-instant",    // 14,400 req/day — highest limit
+  "gemma2-9b-it",            // 14,400 req/day
+  "llama3-8b-8192",          // high limit
+  "llama-3.2-3b-preview",    // very high limit
+  "llama-3.3-70b-versatile", // better quality but lower limit — last resort
 ];
 const IS_TEST = process.env.TEST_MODE === "true";
 
@@ -35,7 +36,7 @@ async function fetchWithFallback(body: object): Promise<Response> {
     const res = await callGroq(MODELS[i], body);
     if (res.ok) return res;
     lastStatus = res.status;
-    const retryable = res.status === 429 || res.status === 503 || res.status === 502;
+    const retryable = res.status === 429 || res.status === 503 || res.status === 502 || res.status === 400;
     console.warn(`[debate-runner] ${MODELS[i]} → ${res.status}${retryable ? ", trying next..." : ""}`);
     if (!retryable) throw new Error(`Groq error: ${res.status}`);
     if (i < MODELS.length - 1) await sleep(2000);
