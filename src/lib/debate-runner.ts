@@ -2,7 +2,12 @@ import { supabaseAdmin } from "./supabase";
 import { AGENTS, Agent } from "./agents";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-const MODEL = "minimax/minimax-m2.5:free";
+// Fallback chain: try each model in order if rate-limited
+const MODELS = [
+  "meta-llama/llama-3.1-8b-instruct:free",
+  "mistralai/mistral-7b-instruct:free",
+  "google/gemma-3-12b-it:free",
+];
 const IS_TEST = process.env.TEST_MODE === "true";
 
 const MAX_DEBATE_MS = IS_TEST ? 90_000  : 5 * 60_000; // test: 90s | prod: 5min
@@ -10,35 +15,54 @@ const SUBMISSION_MS = IS_TEST ? 30_000  : 5 * 60_000; // test: 30s | prod: 5min
 
 type HistoryEntry = { speaker: string; text: string };
 
-async function streamAgentResponse(
-  agent: Agent,
-  topic: string,
-  history: HistoryEntry[]
-): Promise<string> {
+async function callOpenRouter(model: string, body: object, stream: boolean): Promise<Response> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${OPENROUTER_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: MODEL,
-      stream: true,
-      temperature: 0.85,
-      max_tokens: 150,
-      messages: [
-        { role: "system", content: agent.systemPrompt },
-        ...history.map((h) => ({
-          role: "user" as const,
-          content: `[${h.speaker}]: ${h.text}`,
-        })),
-        {
-          role: "user",
-          content: `Topic: "${topic}". Make your next argument. Be sharp and stay in character.`,
-        },
-      ],
-    }),
+    body: JSON.stringify({ model, ...body }),
   });
+  return res;
+}
+
+// Tries each model in MODELS until one succeeds (handles 429 rate limits)
+async function fetchWithFallback(body: object, stream: boolean): Promise<Response> {
+  for (let i = 0; i < MODELS.length; i++) {
+    const res = await callOpenRouter(MODELS[i], body, stream);
+    if (res.ok) return res;
+    if (res.status === 429 && i < MODELS.length - 1) {
+      console.warn(`[debate-runner] ${MODELS[i]} rate limited, trying next model...`);
+      await sleep(2000);
+      continue;
+    }
+    throw new Error(`OpenRouter error: ${res.status}`);
+  }
+  throw new Error("All models rate limited");
+}
+
+async function streamAgentResponse(
+  agent: Agent,
+  topic: string,
+  history: HistoryEntry[]
+): Promise<string> {
+  const res = await fetchWithFallback({
+    stream: true,
+    temperature: 0.85,
+    max_tokens: 150,
+    messages: [
+      { role: "system", content: agent.systemPrompt },
+      ...history.map((h) => ({
+        role: "user" as const,
+        content: `[${h.speaker}]: ${h.text}`,
+      })),
+      {
+        role: "user",
+        content: `Topic: "${topic}". Make your next argument. Be sharp and stay in character.`,
+      },
+    ],
+  }, true);
 
   if (!res.ok) throw new Error(`OpenRouter error: ${res.status}`);
 
@@ -68,25 +92,17 @@ async function judgeConclusive(history: HistoryEntry[]): Promise<boolean> {
   if (history.length < 4) return false; // minimum 2 rounds each
 
   const transcript = history.map((h) => `${h.speaker}: ${h.text}`).join("\n\n");
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 10,
-      messages: [
-        {
-          role: "system",
-          content:
-            'You are a debate judge. Reply only "YES" or "NO". Has this debate reached a clear, decisive conclusion where one side has definitively made stronger arguments? Only say YES if it is very obvious.',
-        },
-        { role: "user", content: transcript },
-      ],
-    }),
-  });
+  const res = await fetchWithFallback({
+    max_tokens: 10,
+    messages: [
+      {
+        role: "system",
+        content:
+          'You are a debate judge. Reply only "YES" or "NO". Has this debate reached a clear, decisive conclusion where one side has definitively made stronger arguments? Only say YES if it is very obvious.',
+      },
+      { role: "user", content: transcript },
+    ],
+  }, false);
 
   const data = await res.json();
   const answer = data.choices?.[0]?.message?.content?.trim().toUpperCase() ?? "";
@@ -100,24 +116,16 @@ async function judgeWinner(
 ): Promise<{ winnerId: string; reason: string }> {
   const transcript = history.map((h) => `${h.speaker}: ${h.text}`).join("\n\n");
 
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 120,
-      messages: [
-        {
-          role: "system",
-          content: `You are an impartial debate judge. The debaters are "${agentA.name}" and "${agentB.name}". Evaluate argument quality, logic, and persuasiveness. Respond in JSON: {"winner": "<exact name>", "reason": "<1-2 sentences>"}`,
-        },
-        { role: "user", content: transcript },
-      ],
-    }),
-  });
+  const res = await fetchWithFallback({
+    max_tokens: 120,
+    messages: [
+      {
+        role: "system",
+        content: `You are an impartial debate judge. The debaters are "${agentA.name}" and "${agentB.name}". Evaluate argument quality, logic, and persuasiveness. Respond in JSON: {"winner": "<exact name>", "reason": "<1-2 sentences>"}`,
+      },
+      { role: "user", content: transcript },
+    ],
+  }, false);
 
   const data = await res.json();
   const raw = data.choices?.[0]?.message?.content ?? "{}";
