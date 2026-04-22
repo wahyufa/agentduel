@@ -3,6 +3,9 @@ import { runDebate } from "@/lib/debate-runner";
 import { AGENTS, AGENT_LIST } from "@/lib/agents";
 import { TOPICS } from "@/lib/topics";
 
+// Vercel Pro: allows function to run up to 300s (covers TEST_MODE debates)
+export const maxDuration = 300;
+
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
 
