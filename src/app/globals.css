@@ -1,20 +1,40 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f7f3ec;
+  --bg: #faf8f4;
+  --surface: #f3ede3;
+  --surface-2: #ede5d8;
+  --border: #ddd0c0;
+  --border-2: #c8b89e;
+  --text: #18100a;
+  --muted: #7a6a58;
+  --red: #e8341a;
+  --fire: #ff6535;
+  --gold: #c47f22;
   --white: #ffffff;
-  --border: #e0d9ce;
-  --text: #1a1714;
-  --muted: #8a8178;
-  --red: #d93b1f;
-  --blue: #1a52e8;
-  --yellow: #e8a100;
+  --nav-bg: rgba(250,248,244,0.92);
+}
+
+[data-theme="dark"] {
+  --bg: #080604;
+  --surface: #0f0c0a;
+  --surface-2: #171210;
+  --border: #251c17;
+  --border-2: #3a2a22;
+  --text: #ede3d4;
+  --muted: #7a6a58;
+  --red: #e8341a;
+  --fire: #ff6535;
+  --gold: #d4933a;
+  --white: #ffffff;
+  --nav-bg: rgba(8,6,4,0.92);
 }
 
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-inter), sans-serif;
+  transition: background 0.2s, color 0.2s;
 }
 
 .font-display {
@@ -27,9 +47,10 @@ body {
 
 /* ── Override wallet adapter modal defaults ── */
 .wallet-adapter-modal-wrapper {
-  background: var(--white) !important;
+  background: var(--surface) !important;
   border-radius: 12px !important;
-  border: 1px solid var(--border) !important;
+  border: 1px solid var(--border-2) !important;
+  transition: background 0.2s, border-color 0.2s;
 }
 .wallet-adapter-modal-title {
   color: var(--text) !important;
@@ -39,13 +60,13 @@ body {
 }
 .wallet-adapter-button {
   background: transparent !important;
-  border: 1px solid var(--border) !important;
+  border: 1px solid var(--border-2) !important;
   color: var(--text) !important;
   border-radius: 8px !important;
   font-family: var(--font-inter), sans-serif !important;
 }
 .wallet-adapter-button:hover {
-  background: var(--bg) !important;
+  background: var(--surface-2) !important;
 }
 
 /* ── Wallet Button ── */
@@ -61,13 +82,13 @@ body {
 .wallet-btn:hover { opacity: 0.8; }
 
 .wallet-btn--connect {
-  background: var(--text);
-  color: var(--bg);
+  background: var(--red);
+  color: #fff;
 }
 
 .wallet-btn--connected {
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-2);
   color: var(--text);
   display: flex;
   align-items: center;
@@ -101,13 +122,13 @@ body {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  background: var(--white);
-  border: 1px solid var(--border);
+  background: var(--surface);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
   padding: 12px;
   min-width: 260px;
   z-index: 50;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  box-shadow: 0 4px 32px rgba(0,0,0,0.15);
 }
 
 .wallet-menu-address {
@@ -117,7 +138,7 @@ body {
   word-break: break-all;
   margin-bottom: 10px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-2);
 }
 
 .wallet-menu-balance {
@@ -133,8 +154,8 @@ body {
 
 .wallet-menu-network {
   font-size: 10px;
-  background: #fef9c3;
-  color: #854d0e;
+  background: rgba(212,147,58,0.15);
+  color: var(--gold);
   padding: 2px 6px;
   border-radius: 4px;
   text-transform: uppercase;
@@ -145,7 +166,7 @@ body {
   width: 100%;
   padding: 8px;
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-2);
   border-radius: 6px;
   font-size: 13px;
   color: var(--muted);
@@ -153,7 +174,7 @@ body {
   transition: all 0.15s;
 }
 .wallet-menu-disconnect:hover {
-  background: #fee2e2;
+  background: rgba(232,52,26,0.08);
   border-color: var(--red);
   color: var(--red);
 }

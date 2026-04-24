@@ -3,13 +3,11 @@ import { AGENTS, Agent } from "./agents";
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-// Ordered by rate-limit generosity — smaller models have higher daily limits on Groq free tier
+// Models confirmed active on Groq — ordered small→large (small = higher rate limit)
 const MODELS = [
-  "llama-3.1-8b-instant",    // 14,400 req/day — highest limit
-  "gemma2-9b-it",            // 14,400 req/day
-  "llama3-8b-8192",          // high limit
-  "llama-3.2-3b-preview",    // very high limit
-  "llama-3.3-70b-versatile", // better quality but lower limit — last resort
+  "llama-3.1-8b-instant",     // fast, high rate limit
+  "llama-3.3-70b-versatile",  // best quality, lower rate limit
+  "llama-3.1-70b-versatile",  // fallback 70b
 ];
 const IS_TEST = process.env.TEST_MODE === "true";
 
@@ -29,19 +27,25 @@ async function callGroq(model: string, body: object): Promise<Response> {
   });
 }
 
-// Tries each Groq model in order on rate limits (429) or unavailability
-async function fetchWithFallback(body: object): Promise<Response> {
+// Tries each Groq model in order; if all fail, waits then retries the whole chain
+async function fetchWithFallback(body: object, attempt = 0): Promise<Response> {
   let lastStatus = 0;
   for (let i = 0; i < MODELS.length; i++) {
     const res = await callGroq(MODELS[i], body);
     if (res.ok) return res;
     lastStatus = res.status;
-    const retryable = res.status === 429 || res.status === 503 || res.status === 502 || res.status === 400;
+    const retryable = res.status === 429 || res.status === 503 || res.status === 502 || res.status === 400 || res.status === 404;
     console.warn(`[debate-runner] ${MODELS[i]} → ${res.status}${retryable ? ", trying next..." : ""}`);
     if (!retryable) throw new Error(`Groq error: ${res.status}`);
-    if (i < MODELS.length - 1) await sleep(2000);
+    if (i < MODELS.length - 1) await sleep(1500);
   }
-  throw new Error(`All Groq models failed (last: ${lastStatus})`);
+
+  // All models exhausted — exponential backoff then retry (max 4 full attempts)
+  if (attempt >= 4) throw new Error(`All Groq models failed after ${attempt + 1} attempts (last: ${lastStatus})`);
+  const backoff = Math.min(15_000 * Math.pow(2, attempt), 120_000); // 15s → 30s → 60s → 120s
+  console.warn(`[debate-runner] all models rate-limited, retrying in ${backoff / 1000}s (attempt ${attempt + 1})`);
+  await sleep(backoff);
+  return fetchWithFallback(body, attempt + 1);
 }
 
 async function streamAgentResponse(
@@ -155,6 +159,14 @@ export async function runDebate(
 
   while (Date.now() - startTime < MAX_DEBATE_MS) {
     for (const agent of [agentA, agentB]) {
+      // Bail if debate was deleted externally
+      const { data: still } = await db
+        .from("debates")
+        .select("id")
+        .eq("id", debateId)
+        .maybeSingle();
+      if (!still) return;
+
       // Show typing indicator
       await db
         .from("debates")

@@ -8,7 +8,7 @@ const bebas = Bebas_Neue({ weight: "400", subsets: ["latin"], variable: "--font-
 const dmMono = DM_Mono({ weight: ["400", "500"], subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: "AgentDuel — AI Debates. Real Stakes.",
+  title: "ENJOU — 炎上 · AI Debates. Real Stakes.",
   description: "Two AI agents argue. You bet on who wins. Built on Solana.",
 };
 
